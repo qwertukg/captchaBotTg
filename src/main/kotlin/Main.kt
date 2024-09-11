@@ -4,12 +4,11 @@ import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.dispatch
 import com.github.kotlintelegrambot.dispatcher.callbackQuery
 import com.github.kotlintelegrambot.dispatcher.newChatMembers
-import com.github.kotlintelegrambot.entities.ChatId
-import com.github.kotlintelegrambot.entities.InlineKeyboardMarkup
+import com.github.kotlintelegrambot.entities.*
 import com.github.kotlintelegrambot.entities.keyboard.InlineKeyboardButton
-import com.github.kotlintelegrambot.entities.TelegramFile
 import java.awt.Color
 import java.awt.Font
+import java.awt.Graphics
 import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
@@ -19,6 +18,7 @@ data class Image(val path: String, val number: Int, val isRight: Boolean)
 fun main() {
     val botToken = System.getenv("TOKEN")
     val path = "src/main/resources/images"
+    val attempts = 3
 
     // Хранение идентификатора пользователя и соответствующей капчи
     val userCaptchaMap = mutableMapOf<Long, Long>()
@@ -38,6 +38,13 @@ fun main() {
                     val chatId = update.message!!.chat.id
                     val userPath = "$path/user_$userId"
 
+                    // Ограничиваем возможность отправки сообщений для нового пользователя
+                    bot.restrictChatMember(
+                        chatId = ChatId.fromId(chatId),
+                        userId = userId,
+                        chatPermissions = ChatPermissions(canSendMessages = false)
+                    )
+
                     // Создаем вложенную папку для пользователя
                     File(userPath).mkdirs()
 
@@ -46,7 +53,7 @@ fun main() {
 
                     if (imageList.isNotEmpty()) {
                         // Устанавливаем количество попыток для пользователя
-                        userAttemptsMap[userId] = 3
+                        userAttemptsMap[userId] = attempts
 
                         // Генерируем вопрос с изображениями
                         val correctImage = imageList.first { it.isRight }
@@ -54,6 +61,19 @@ fun main() {
 
                         val imagesForCaptcha = (listOf(correctImage) + incorrectImages).shuffled()
 
+                        // Склеиваем изображения в одно с шириной максимум 3 изображения
+                        val combinedImage = combineImages(imagesForCaptcha, 3)
+                        val combinedImagePath = "$userPath/combined_image.png"
+                        ImageIO.write(combinedImage, "png", File(combinedImagePath))
+
+                        // Отправляем склеенное изображение пользователю
+                        val telegramFile = TelegramFile.ByFile(File(combinedImagePath))
+                        bot.sendPhoto(
+                            chatId = ChatId.fromId(chatId),
+                            photo = telegramFile
+                        )
+
+                        // Создаем клавиатуру с вариантами ответа
                         val inlineKeyboardMarkup = InlineKeyboardMarkup.createSingleRowKeyboard(
                             imagesForCaptcha.map { image ->
                                 InlineKeyboardButton.CallbackData(
@@ -69,15 +89,6 @@ fun main() {
                             text = "Привет, ${newUser.firstName}! Для присоединения к группе, реши капчу. Выберите правильное изображение.",
                             replyMarkup = inlineKeyboardMarkup
                         ).getOrNull()?.messageId
-
-                        // Отправляем изображения пользователю
-                        imagesForCaptcha.forEach { image ->
-                            val telegramFile = TelegramFile.ByFile(File(image.path))
-                            bot.sendPhoto(
-                                chatId = ChatId.fromId(chatId),
-                                photo = telegramFile
-                            )
-                        }
 
                         // Сохраняем ID пользователя и ID сообщения с капчей
                         if (messageId != null) {
@@ -105,6 +116,13 @@ fun main() {
                         // Пользователь прошел капчу успешно
                         bot.sendMessage(chatId = ChatId.fromId(chatId), text = "Правильно! Добро пожаловать в группу.")
 
+                        // Снимаем ограничения с пользователя
+                        bot.restrictChatMember(
+                            chatId = ChatId.fromId(chatId),
+                            userId = userId,
+                            chatPermissions = ChatPermissions(canSendMessages = true)
+                        )
+
                         // Удаляем все сгенерированные изображения
                         deleteGeneratedImages(path, userId)
 
@@ -130,13 +148,8 @@ fun main() {
                             // Блокируем и удаляем пользователя из группы
                             bot.banChatMember(
                                 chatId = ChatId.fromId(chatId),
-                                userId = userId
-                            )
-
-                            // Пытаемся разблокировать пользователя, чтобы он мог снова попробовать присоединиться позже
-                            bot.unbanChatMember(
-                                chatId = ChatId.fromId(chatId),
-                                userId = userId
+                                userId = userId,
+                                untilDate = System.currentTimeMillis() / 1000 + 60
                             )
 
                             // Удаляем все сгенерированные изображения
@@ -183,30 +196,80 @@ fun loadAndProcessImages(inputPath: String, outputPath: String): List<Image> {
             val img = ImageIO.read(file)
 
             // Создаем новое изображение с номером
-            val newImg = addNumberToImage(img, index + 1)
+            val newImg = addNumberToImage(img, index)
 
             // Сохраняем измененное изображение в папке пользователя
-            val outputFilePath = "$outputPath/numbered_${index + 1}.png"
-            ImageIO.write(newImg, "png", File(outputFilePath))
+            val newOutputPath = "$outputPath/numbered_${index}.png"
+            ImageIO.write(newImg, "png", File(newOutputPath))
 
             // Определяем, является ли изображение правильным по суффиксу '_correct'
             val isRight = file.name.contains("_correct")
 
             // Добавляем изображение в список, одно из них будет правильным
-            images.add(Image(outputFilePath, index + 1, isRight))
+            images.add(Image(newOutputPath, index, isRight))
         }
     }
     return images
 }
 
-// Функция для добавления номера к изображению
+// Функция для изменения размера изображения, добавления номера и черной рамки
 fun addNumberToImage(img: BufferedImage, number: Int): BufferedImage {
-    val newImg = BufferedImage(img.width, img.height, BufferedImage.TYPE_INT_ARGB)
+    // Определяем новый размер
+    val targetWidth = 200
+    val targetHeight = 200
+
+    // Создаем изображение с новым размером
+    val resizedImg = BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB)
+    val g = resizedImg.createGraphics()
+    g.drawImage(img, 0, 0, targetWidth, targetHeight, null)
+    g.dispose()
+
+    // Создаем новое изображение для добавления рамки и номера
+    val newImg = BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB)
     val g2d = newImg.createGraphics()
-    g2d.drawImage(img, 0, 0, null)
+
+    // Рисуем измененное изображение
+    g2d.drawImage(resizedImg, 0, 0, null)
+
+    // Устанавливаем цвет для рамки и рисуем черный прямоугольник по границе
+    g2d.color = Color.BLACK
+    g2d.drawRect(0, 0, targetWidth - 1, targetHeight - 1)
+
+    // Устанавливаем цвет и шрифт для номера
     g2d.color = Color.RED
     g2d.font = Font("Arial", Font.BOLD, 20)
+
+    // Добавляем номер изображения
     g2d.drawString(number.toString(), 10, 30)
     g2d.dispose()
+
     return newImg
+}
+
+
+
+// Функция для склеивания изображений с максимальной шириной в 3 изображения
+fun combineImages(images: List<Image>, maxWidth: Int): BufferedImage {
+    val bufferedImages = images.map { ImageIO.read(File(it.path)) }
+    val imageWidth = bufferedImages[0].width
+    val imageHeight = bufferedImages[0].height
+
+    // Определяем размеры итогового изображения
+    val rows = (bufferedImages.size + maxWidth - 1) / maxWidth
+    val combinedWidth = maxWidth * imageWidth
+    val combinedHeight = rows * imageHeight
+
+    // Создаем пустое изображение для склейки
+    val combinedImage = BufferedImage(combinedWidth, combinedHeight, BufferedImage.TYPE_INT_ARGB)
+    val g: Graphics = combinedImage.graphics
+
+    // Рисуем изображения в итоговом изображении
+    bufferedImages.forEachIndexed { index, img ->
+        val x = (index % maxWidth) * imageWidth
+        val y = (index / maxWidth) * imageHeight
+        g.drawImage(img, x, y, null)
+    }
+
+    g.dispose()
+    return combinedImage
 }
