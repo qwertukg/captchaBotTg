@@ -6,69 +6,83 @@ import com.github.kotlintelegrambot.dispatcher.callbackQuery
 import com.github.kotlintelegrambot.dispatcher.newChatMembers
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.InlineKeyboardMarkup
-import com.github.kotlintelegrambot.entities.TelegramFile
 import com.github.kotlintelegrambot.entities.keyboard.InlineKeyboardButton
-import org.opencv.core.Core
-import org.opencv.core.Point
-import org.opencv.core.Scalar
-import org.opencv.imgcodecs.Imgcodecs
-import org.opencv.imgproc.Imgproc
+import com.github.kotlintelegrambot.entities.TelegramFile
+import java.awt.Color
+import java.awt.Font
+import java.awt.image.BufferedImage
 import java.io.File
+import javax.imageio.ImageIO
 
 data class Image(val path: String, val number: Int, val isRight: Boolean)
 
 fun main() {
-//    System.loadLibrary(Core.NATIVE_LIBRARY_NAME)
-    val botToken = System.getenv("BOT_TOKEN")
+    val botToken = System.getenv("TOKEN")
+    val path = "src/main/resources/images"
+
+    // Хранение идентификатора пользователя и соответствующей капчи
+    val userCaptchaMap = mutableMapOf<Long, Long>()
+    val userAttemptsMap = mutableMapOf<Long, Int>() // Хранение оставшихся попыток для каждого пользователя
 
     // Создаем бота
     val bot = bot {
         token = botToken
-
-        // Хранение идентификатора пользователя и соответствующей капчи
-        val userCaptchaMap = mutableMapOf<Long, Long>()
-        val imageList = loadAndProcessImages("/images")
 
         dispatch {
             // Обработчик добавления нового пользователя в группу
             newChatMembers {
                 val newUser = update.message?.newChatMembers?.firstOrNull()
 
-                if (newUser != null && imageList.isNotEmpty()) {
-                    // Генерируем вопрос с изображениями
-                    val correctImage = imageList.first { it.isRight }
-                    val incorrectImages = imageList.filter { !it.isRight }.shuffled().take(5)
+                if (newUser != null) {
+                    val userId = newUser.id
+                    val chatId = update.message!!.chat.id
+                    val userPath = "$path/user_$userId"
 
-                    val imagesForCaptcha = (listOf(correctImage) + incorrectImages).shuffled()
+                    // Создаем вложенную папку для пользователя
+                    File(userPath).mkdirs()
 
-                    val inlineKeyboardMarkup = InlineKeyboardMarkup.createSingleRowKeyboard(
-                        imagesForCaptcha.map { image ->
-                            InlineKeyboardButton.CallbackData(
-                                text = image.number.toString(),
-                                callbackData = image.number.toString()
+                    // Загружаем и обрабатываем изображения для конкретного пользователя
+                    val imageList = loadAndProcessImages(path, userPath)
+
+                    if (imageList.isNotEmpty()) {
+                        // Устанавливаем количество попыток для пользователя
+                        userAttemptsMap[userId] = 3
+
+                        // Генерируем вопрос с изображениями
+                        val correctImage = imageList.first { it.isRight }
+                        val incorrectImages = imageList.filter { !it.isRight }.shuffled().take(5)
+
+                        val imagesForCaptcha = (listOf(correctImage) + incorrectImages).shuffled()
+
+                        val inlineKeyboardMarkup = InlineKeyboardMarkup.createSingleRowKeyboard(
+                            imagesForCaptcha.map { image ->
+                                InlineKeyboardButton.CallbackData(
+                                    text = image.number.toString(),
+                                    callbackData = image.number.toString()
+                                )
+                            }
+                        )
+
+                        // Отправляем сообщение с вопросом и кнопками новому пользователю
+                        val messageId = bot.sendMessage(
+                            chatId = ChatId.fromId(chatId),
+                            text = "Привет, ${newUser.firstName}! Для присоединения к группе, реши капчу. Выберите правильное изображение.",
+                            replyMarkup = inlineKeyboardMarkup
+                        ).getOrNull()?.messageId
+
+                        // Отправляем изображения пользователю
+                        imagesForCaptcha.forEach { image ->
+                            val telegramFile = TelegramFile.ByFile(File(image.path))
+                            bot.sendPhoto(
+                                chatId = ChatId.fromId(chatId),
+                                photo = telegramFile
                             )
                         }
-                    )
 
-                    // Отправляем сообщение с вопросом и кнопками новому пользователю
-                    val messageId = bot.sendMessage(
-                        chatId = ChatId.fromId(update.message!!.chat.id),
-                        text = "Выберите правильное изображение.",
-                        replyMarkup = inlineKeyboardMarkup
-                    ).getOrNull()?.messageId
-
-                    // Отправляем изображения пользователю
-                    imagesForCaptcha.forEach { image ->
-                        val telegramFile = TelegramFile.ByFile(File(image.path))
-                        bot.sendPhoto(
-                            chatId = ChatId.fromId(update.message!!.chat.id),
-                            photo = telegramFile
-                        )
-                    }
-
-                    // Сохраняем ID пользователя и ID сообщения с капчей
-                    if (messageId != null) {
-                        userCaptchaMap[newUser.id] = messageId
+                        // Сохраняем ID пользователя и ID сообщения с капчей
+                        if (messageId != null) {
+                            userCaptchaMap[userId] = messageId
+                        }
                     }
                 }
             }
@@ -78,31 +92,64 @@ fun main() {
                 val callbackQuery = update.callbackQuery!!
                 val userId = callbackQuery.from.id
                 val answer = callbackQuery.data.toIntOrNull()
+                val chatId = callbackQuery.message!!.chat.id
 
-                // Проверяем, что только пользователь, которому была отправлена капча, может на неё ответить
-                if (userCaptchaMap.containsKey(userId) && userCaptchaMap[userId] == callbackQuery.message?.messageId) {
-                    val responseText = if (answer == imageList.firstOrNull { it.isRight }?.number) {
-                        "Правильно! Добро пожаловать в группу."
+                // Получаем список изображений для текущего пользователя
+                val imageList = loadAndProcessImages(path, "$path/user_$userId")
+
+                if (imageList.isNotEmpty() && userCaptchaMap.containsKey(userId) && userCaptchaMap[userId] == callbackQuery.message?.messageId) {
+                    val isCorrect = answer == imageList.firstOrNull { it.isRight }?.number
+                    val remainingAttempts = userAttemptsMap[userId] ?: 0
+
+                    if (isCorrect) {
+                        // Пользователь прошел капчу успешно
+                        bot.sendMessage(chatId = ChatId.fromId(chatId), text = "Правильно! Добро пожаловать в группу.")
+
+                        // Удаляем все сгенерированные изображения
+                        deleteGeneratedImages(path, userId)
+
+                        // Удаляем записи о пользователе
+                        userCaptchaMap.remove(userId)
+                        userAttemptsMap.remove(userId)
                     } else {
-                        "Неправильно! Попробуйте снова."
-                    }
+                        // Неверный ответ
+                        if (remainingAttempts > 1) {
+                            // Уменьшаем количество оставшихся попыток
+                            userAttemptsMap[userId] = remainingAttempts - 1
+                            bot.sendMessage(
+                                chatId = ChatId.fromId(chatId),
+                                text = "Неправильно! Попробуйте снова. Осталось попыток: ${remainingAttempts - 1}"
+                            )
+                        } else {
+                            // Удаляем пользователя из группы и блокируем его, если ответ неправильный и попытки закончились
+                            bot.sendMessage(
+                                chatId = ChatId.fromId(chatId),
+                                text = "Вы исчерпали все попытки. Вы будете заблокированы."
+                            )
 
-                    // Отправляем ответ пользователю
-                    bot.sendMessage(chatId = ChatId.fromId(callbackQuery.message!!.chat.id), text = responseText)
+                            // Блокируем и удаляем пользователя из группы
+                            bot.banChatMember(
+                                chatId = ChatId.fromId(chatId),
+                                userId = userId
+                            )
+
+                            // Пытаемся разблокировать пользователя, чтобы он мог снова попробовать присоединиться позже
+                            bot.unbanChatMember(
+                                chatId = ChatId.fromId(chatId),
+                                userId = userId
+                            )
+
+                            // Удаляем все сгенерированные изображения
+                            deleteGeneratedImages(path, userId)
+
+                            // Удаляем записи о пользователе
+                            userCaptchaMap.remove(userId)
+                            userAttemptsMap.remove(userId)
+                        }
+                    }
 
                     // Подтверждаем обработку callback-запроса
                     bot.answerCallbackQuery(callbackQuery.id)
-
-                    // Удаляем пользователя из группы, если ответ неправильный
-                    if (answer != imageList.firstOrNull { it.isRight }?.number) {
-                        bot.banChatMember(
-                            chatId = ChatId.fromId(callbackQuery.message!!.chat.id),
-                            userId = userId
-                        )
-                    } else {
-                        // Удаляем запись о пользователе, если ответ правильный
-                        userCaptchaMap.remove(userId)
-                    }
                 } else {
                     // Отправляем уведомление, что только конкретный пользователь может решить капчу
                     bot.answerCallbackQuery(
@@ -118,34 +165,48 @@ fun main() {
     bot.startPolling()
 }
 
-// Функция для загрузки изображений из папки и добавления на них номеров с использованием OpenCV
-fun loadAndProcessImages(directoryPath: String): List<Image> {
-    val dir = File(directoryPath)
+// Функция для удаления сгенерированных изображений
+fun deleteGeneratedImages(basePath: String, userId: Long) {
+    val userPath = "$basePath/user_$userId"
+    File(userPath).listFiles()?.forEach { file -> file.delete() }
+    File(userPath).delete()
+}
+
+// Функция для загрузки изображений из папки и добавления на них номеров с использованием AWT
+fun loadAndProcessImages(inputPath: String, outputPath: String): List<Image> {
+    val dir = File(inputPath)
     val images = mutableListOf<Image>()
     if (dir.exists() && dir.isDirectory) {
         val files = dir.listFiles { file -> file.isFile }
         files?.forEachIndexed { index, file ->
-            // Загружаем изображение с помощью OpenCV
-            val img = Imgcodecs.imread(file.path)
+            // Загружаем изображение с помощью ImageIO
+            val img = ImageIO.read(file)
 
-            // Добавляем номер на изображение
-            Imgproc.putText(
-                img,
-                (index + 1).toString(),
-                Point(10.0, 30.0),
-                Imgproc.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                Scalar(255.0, 0.0, 0.0),
-                2
-            )
+            // Создаем новое изображение с номером
+            val newImg = addNumberToImage(img, index + 1)
 
-            // Сохраняем измененное изображение
-            val outputPath = "${file.parent}/numbered_${index + 1}.png"
-            Imgcodecs.imwrite(outputPath, img)
+            // Сохраняем измененное изображение в папке пользователя
+            val outputFilePath = "$outputPath/numbered_${index + 1}.png"
+            ImageIO.write(newImg, "png", File(outputFilePath))
+
+            // Определяем, является ли изображение правильным по суффиксу '_correct'
+            val isRight = file.name.contains("_correct")
 
             // Добавляем изображение в список, одно из них будет правильным
-            images.add(Image(outputPath, index + 1, isRight = (index == 0))) // Первое изображение правильное
+            images.add(Image(outputFilePath, index + 1, isRight))
         }
     }
     return images
+}
+
+// Функция для добавления номера к изображению
+fun addNumberToImage(img: BufferedImage, number: Int): BufferedImage {
+    val newImg = BufferedImage(img.width, img.height, BufferedImage.TYPE_INT_ARGB)
+    val g2d = newImg.createGraphics()
+    g2d.drawImage(img, 0, 0, null)
+    g2d.color = Color.RED
+    g2d.font = Font("Arial", Font.BOLD, 20)
+    g2d.drawString(number.toString(), 10, 30)
+    g2d.dispose()
+    return newImg
 }
