@@ -2,6 +2,8 @@
 
 ## App Configuration
 
+Correct image must have _`correct` suffix in filename
+
 ### Set environments variables
 `BOT_TOKEN` - Telegram bot token
 
