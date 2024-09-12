@@ -9,13 +9,13 @@ Correct image must have _`correct` suffix in filename
 
 `QUESTION` - Captcha question
 
-`IMAGES_PATH` - Path for captcha images on server (read, create, delete)
+`IMAGES_PATH` - Path for captcha images folder on server (read, create, delete)
 
 `ATTEMPTS` - Attempts count
 
 `COLUMNS_COUNT` - Count of columns, in a row if images and buttons
 
-`BAN_TIME_SECONDS` - Number of seconds for failed captcha users
+`BAN_TIME_SECONDS` - Number of ban time seconds for failed captcha users
 
 ## Bot Configuration 
 
