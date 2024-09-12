@@ -6,6 +6,7 @@ import com.github.kotlintelegrambot.dispatcher.callbackQuery
 import com.github.kotlintelegrambot.dispatcher.newChatMembers
 import com.github.kotlintelegrambot.entities.*
 import com.github.kotlintelegrambot.entities.keyboard.InlineKeyboardButton
+import com.github.kotlintelegrambot.network.fold
 import java.awt.Color
 import java.awt.Font
 import java.awt.Graphics
@@ -16,9 +17,12 @@ import javax.imageio.ImageIO
 data class Image(val path: String, val number: Int, val isRight: Boolean)
 
 fun main() {
-    val botToken = System.getenv("TOKEN")
-    val path = "src/main/resources/images"
-    val attempts = 3
+    val botToken = System.getenv("BOT_TOKEN") ?: throw RuntimeException("TOKEN not found.")
+    val question = System.getenv("QUESTION") ?: throw RuntimeException("QUESTION not found.")
+    val path = System.getenv("IMAGES_PATH") ?: throw RuntimeException("IMAGES_PATH not found.")
+    val attempts = System.getenv("ATTEMPTS")?.toInt() ?: throw RuntimeException("ATTEMPTS not found.")
+    val columnsCount = System.getenv("COLUMNS_COUNT")?.toInt() ?: throw RuntimeException("COLUMNS_COUNT not found.")
+    val banTimeSeconds = System.getenv("BAN_TIME_SECONDS")?.toInt() ?: throw RuntimeException("BAN_TIME_SECONDS not found.")
 
     // Хранение идентификатора пользователя и соответствующей капчи
     val userCaptchaMap = mutableMapOf<Long, Long>()
@@ -61,39 +65,47 @@ fun main() {
 
                         val imagesForCaptcha = (listOf(correctImage) + incorrectImages).shuffled()
 
-                        // Склеиваем изображения в одно с шириной максимум 3 изображения
-                        val combinedImage = combineImages(imagesForCaptcha, 3)
+                        // Склеиваем изображения в одно с шириной максимум columnsCount
+                        val combinedImage = combineImages(imagesForCaptcha, columnsCount)
                         val combinedImagePath = "$userPath/combined_image.png"
                         ImageIO.write(combinedImage, "png", File(combinedImagePath))
 
-                        // Отправляем склеенное изображение пользователю
-                        val telegramFile = TelegramFile.ByFile(File(combinedImagePath))
-                        bot.sendPhoto(
-                            chatId = ChatId.fromId(chatId),
-                            photo = telegramFile
+
+
+                        // Создаем клавиатуру с вариантами ответа, динамически создавая ряды кнопок
+                        val inlineKeyboardButtons = imagesForCaptcha.map { image ->
+                            InlineKeyboardButton.CallbackData(
+                                text = image.number.toString(),
+                                callbackData = image.number.toString()
+                            )
+                        }
+
+                        // Разделяем кнопки на ряды
+                        val inlineKeyboardMarkup = InlineKeyboardMarkup.create(
+                            inlineKeyboardButtons.chunked(columnsCount) // Создаем ряды кнопок, соответствующие количеству изображений в ряду
                         )
 
-                        // Создаем клавиатуру с вариантами ответа
-                        val inlineKeyboardMarkup = InlineKeyboardMarkup.createSingleRowKeyboard(
-                            imagesForCaptcha.map { image ->
-                                InlineKeyboardButton.CallbackData(
-                                    text = image.number.toString(),
-                                    callbackData = image.number.toString()
-                                )
+                        // Отправляем склеенное изображение пользователю с подписью и кнопками
+                        val telegramFile = TelegramFile.ByFile(File(combinedImagePath))
+                        val sendPhotoResult = bot.sendPhoto(
+                            chatId = ChatId.fromId(chatId),
+                            photo = telegramFile,
+                            caption = "Привет, ${newUser.firstName}! $question",
+                            replyMarkup = inlineKeyboardMarkup
+                        )
+
+                        // Получаем messageId из результата
+                        sendPhotoResult.fold(
+                            response = { messageResponse ->
+                                val currentMessageId = messageResponse?.result?.messageId
+                                if (currentMessageId != null) {
+                                    userCaptchaMap[userId] = currentMessageId
+                                }
+                            },
+                            error = { error ->
+                                println("Ошибка при отправке фото: $error")
                             }
                         )
-
-                        // Отправляем сообщение с вопросом и кнопками новому пользователю
-                        val messageId = bot.sendMessage(
-                            chatId = ChatId.fromId(chatId),
-                            text = "Привет, ${newUser.firstName}! Для присоединения к группе, реши капчу. Выберите правильное изображение.",
-                            replyMarkup = inlineKeyboardMarkup
-                        ).getOrNull()?.messageId
-
-                        // Сохраняем ID пользователя и ID сообщения с капчей
-                        if (messageId != null) {
-                            userCaptchaMap[userId] = messageId
-                        }
                     }
                 }
             }
@@ -104,6 +116,7 @@ fun main() {
                 val userId = callbackQuery.from.id
                 val answer = callbackQuery.data.toIntOrNull()
                 val chatId = callbackQuery.message!!.chat.id
+                val messageId = callbackQuery.message!!.messageId
 
                 // Получаем список изображений для текущего пользователя
                 val imageList = loadAndProcessImages(path, "$path/user_$userId")
@@ -114,13 +127,23 @@ fun main() {
 
                     if (isCorrect) {
                         // Пользователь прошел капчу успешно
-                        bot.sendMessage(chatId = ChatId.fromId(chatId), text = "Правильно! Добро пожаловать в группу.")
+                        bot.answerCallbackQuery(
+                            callbackQuery.id,
+                            text = "Правильно! Добро пожаловать в группу.",
+                            showAlert = true
+                        )
 
                         // Снимаем ограничения с пользователя
                         bot.restrictChatMember(
                             chatId = ChatId.fromId(chatId),
                             userId = userId,
                             chatPermissions = ChatPermissions(canSendMessages = true)
+                        )
+
+                        // Удаляем сообщение с капчей
+                        bot.deleteMessage(
+                            chatId = ChatId.fromId(chatId),
+                            messageId = messageId
                         )
 
                         // Удаляем все сгенерированные изображения
@@ -134,15 +157,17 @@ fun main() {
                         if (remainingAttempts > 1) {
                             // Уменьшаем количество оставшихся попыток
                             userAttemptsMap[userId] = remainingAttempts - 1
-                            bot.sendMessage(
-                                chatId = ChatId.fromId(chatId),
-                                text = "Неправильно! Попробуйте снова. Осталось попыток: ${remainingAttempts - 1}"
+                            bot.answerCallbackQuery(
+                                callbackQuery.id,
+                                text = "Неправильно! Попробуйте снова. Осталось попыток: ${remainingAttempts - 1}",
+                                showAlert = true
                             )
                         } else {
                             // Удаляем пользователя из группы и блокируем его, если ответ неправильный и попытки закончились
-                            bot.sendMessage(
-                                chatId = ChatId.fromId(chatId),
-                                text = "Вы исчерпали все попытки. Вы будете заблокированы."
+                            bot.answerCallbackQuery(
+                                callbackQuery.id,
+                                text = "Вы исчерпали все попытки. Вы будете заблокированы.",
+                                showAlert = true
                             )
 
                             // Блокируем и удаляем пользователя из группы
@@ -150,6 +175,12 @@ fun main() {
                                 chatId = ChatId.fromId(chatId),
                                 userId = userId,
                                 untilDate = System.currentTimeMillis() / 1000 + 60
+                            )
+
+                            // Удаляем сообщение с капчей
+                            bot.deleteMessage(
+                                chatId = ChatId.fromId(chatId),
+                                messageId = messageId
                             )
 
                             // Удаляем все сгенерированные изображения

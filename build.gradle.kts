@@ -24,3 +24,18 @@ tasks.test {
 kotlin {
     jvmToolchain(11)
 }
+
+// Задача для создания "fat JAR"
+tasks.register<Jar>("buildFatJar") {
+    group = "build"
+    manifest {
+        attributes["Main-Class"] = "kz.qwertukg.MainKt"
+    }
+    from(sourceSets.main.get().output)
+    dependsOn(configurations.runtimeClasspath)
+    from({
+        configurations.runtimeClasspath.get().filter { it.name.endsWith("jar") }.map { zipTree(it) }
+    })
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    archiveFileName.set("${project.name}-${project.version}-all.jar")
+}
