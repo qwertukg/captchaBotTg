@@ -121,7 +121,7 @@ fun main() {
                 // Получаем список изображений для текущего пользователя
                 val imageList = loadAndProcessImages(path, "$path/user_$userId")
 
-                if (imageList.isNotEmpty() && userCaptchaMap.containsKey(userId) && userCaptchaMap[userId] == callbackQuery.message?.messageId) {
+                if (!callbackQuery.from.isBot && imageList.isNotEmpty() && userCaptchaMap.containsKey(userId) && userCaptchaMap[userId] == callbackQuery.message?.messageId) {
                     val isCorrect = answer == imageList.firstOrNull { it.isRight }?.number
                     val remainingAttempts = userAttemptsMap[userId] ?: 0
 
