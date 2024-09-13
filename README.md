@@ -2,7 +2,7 @@
 
 ## App Configuration
 
-Correct image must have _`correct` suffix in filename
+Correct image must have `_correct` suffix in filename
 
 ### Set environments variables
 `BOT_TOKEN` - Telegram bot token
@@ -13,7 +13,7 @@ Correct image must have _`correct` suffix in filename
 
 `ATTEMPTS` - Attempts count
 
-`COLUMNS_COUNT` - Count of columns, in a row if images and buttons
+`COLUMNS_COUNT` - Count of columns, in a row of images and buttons
 
 `BAN_TIME_SECONDS` - Number of ban time seconds for failed captcha users
 
