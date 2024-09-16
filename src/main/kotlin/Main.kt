@@ -55,9 +55,6 @@ fun main() {
                 val chatId = callbackQuery.message?.chat?.id ?: return@callbackQuery
                 val messageId = callbackQuery.message?.messageId ?: return@callbackQuery
 
-                // Логирование действия пользователя: нажатие на кнопку
-                logger.info("Пользователь $userId нажал на кнопку в чате $chatId.")
-
                 // Передаем обработку обратного вызова менеджеру капчи
                 captchaManager.handleCallbackQuery(bot, callbackQuery, userId, chatId, messageId)
             }
