@@ -63,6 +63,4 @@ fun main() {
 
     // Запускаем бота
     bot.startPolling()
-    // Сообщаем что бот запущен
-    logger.info("Капча бот запущен: ${bot.getMe()}")
 }
