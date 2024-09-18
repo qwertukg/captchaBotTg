@@ -38,7 +38,7 @@ class CaptchaManager(
      *
      * @param bot Экземпляр бота.
      * @param chatId Идентификатор чата.
-     * @param userId Идентификатор пользователя.
+     * @param user Пользователь.
      */
     fun handleNewUser(bot: Bot, chatId: Long, user: User) {
         // Ограничиваем пользователя от отправки сообщений
@@ -302,7 +302,7 @@ class CaptchaManager(
 
         if (!dir.exists() || !dir.isDirectory) return images
 
-        val files = dir.listFiles { file -> file.isFile } ?: return images
+        val files = dir.listFiles { file -> file.isFile }?.toList()?.shuffled() ?: return images
 
         files.forEachIndexed { index, file ->
             val img = ImageIO.read(file) ?: return@forEachIndexed
