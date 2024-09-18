@@ -40,24 +40,25 @@ class CaptchaManager(
      * @param chatId Идентификатор чата.
      * @param userId Идентификатор пользователя.
      */
-    fun handleNewUser(bot: Bot, chatId: Long, userId: Long) {
+    fun handleNewUser(bot: Bot, chatId: Long, user: User) {
         // Ограничиваем пользователя от отправки сообщений
         bot.restrictChatMember(
             chatId = ChatId.fromId(chatId),
-            userId = userId,
+            userId = user.id,
             chatPermissions = ChatPermissions(canSendMessages = false)
         )
 
         // Создаем состояние пользователя и добавляем в карту
         val userState = UserCaptchaState(
-            userId = userId,
+            userName = user.firstName,
+            userId = user.id,
             attemptsRemaining = maxAttempts,
             captchaMessageId = null
         )
-        userStates[userId] = userState
+        userStates[user.id] = userState
 
         // Создаем уникальную папку для изображений пользователя
-        val userImagesPath = "$imagesPath/user_$userId"
+        val userImagesPath = "$imagesPath/user_${user.id}"
         File(userImagesPath).mkdirs()
 
         // Загружаем и обрабатываем изображения для капчи
@@ -209,7 +210,7 @@ class CaptchaManager(
         val sendPhotoResult = bot.sendPhoto(
             chatId = ChatId.fromId(chatId),
             photo = TelegramFile.ByFile(File(combinedImagePath)),
-            caption = "Привет! $question",
+            caption = "Привет ${userState.userName}! $question\nОсталось попыток: ${userState.attemptsRemaining}",
             replyMarkup = inlineKeyboardMarkup
         )
 

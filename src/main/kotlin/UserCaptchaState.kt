@@ -8,6 +8,7 @@ package kz.qwertukg
  * @property captchaMessageId Идентификатор сообщения с капчей.
  */
 data class UserCaptchaState(
+    val userName: String,
     val userId: Long,
     var attemptsRemaining: Int,
     var captchaMessageId: Long?

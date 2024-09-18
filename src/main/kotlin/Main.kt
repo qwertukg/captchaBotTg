@@ -45,7 +45,7 @@ fun main() {
                 logger.info("Пользователь ${newUser.id} был добавлен в чат $chatId.")
 
                 // Передаем обработку нового пользователя менеджеру капчи
-                captchaManager.handleNewUser(bot, chatId, newUser.id)
+                captchaManager.handleNewUser(bot, chatId, newUser)
             }
 
             // Обработчик для обратных вызовов (нажатия на кнопки)
