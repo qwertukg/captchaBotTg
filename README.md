@@ -13,7 +13,7 @@
 ## Требования
 
 - **Kotlin**: Версия 1.5 или выше.
-- **Telegram Bot API**: Библиотека `kotlin-telegram-bot` для взаимодействия с Telegram API.
+- **Telegram Bot API**: Библиотека [kotlin-telegram-bot](https://github.com/kotlin-telegram-bot/kotlin-telegram-bot) для взаимодействия с Telegram API.
 - **Java**: Для работы с изображениями используется стандартная библиотека Java `java.awt`.
 
 ## Установка
@@ -21,13 +21,13 @@
 1. **Клонируйте репозиторий:**
 
    ```bash
-   git clone https://github.com/yourusername/telegram-captcha-bot.git
+   git clone https://github.com/qwertukg/captchaBotTg.git
    ```
 
 2. **Перейдите в директорию проекта:**
 
    ```bash
-   cd telegram-captcha-bot
+   cd captchaBotTg
    ```
 
 3. **Настройте переменные окружения:**
