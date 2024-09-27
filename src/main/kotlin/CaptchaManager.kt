@@ -41,6 +41,12 @@ class CaptchaManager(
      * @param user Пользователь.
      */
     fun handleNewUser(bot: Bot, chatId: Long, user: User) {
+        // Проверяем, что новый пользователь не является самим ботом
+        if (user.id == bot.getMe().get().id) {
+            // Если это бот, ничего не делаем
+            return
+        }
+
         // Ограничиваем пользователя от отправки сообщений
         bot.restrictChatMember(
             chatId = ChatId.fromId(chatId),
@@ -129,7 +135,14 @@ class CaptchaManager(
             bot.restrictChatMember(
                 chatId = ChatId.fromId(chatId),
                 userId = userId,
-                chatPermissions = ChatPermissions(canSendMessages = true)
+                chatPermissions = ChatPermissions(
+                    canSendMessages = true,
+                    canSendMediaMessages = true,
+                    canSendPolls = true,
+                    canSendOtherMessages = true,
+                    canAddWebPagePreviews = true,
+                    canInviteUsers = true,
+                )
             )
 
             // Удаляем сообщение с капчей
@@ -155,7 +168,6 @@ class CaptchaManager(
                     text = "Неправильно! Осталось попыток: ${userState.attemptsRemaining}",
                     showAlert = true
                 )
-                resendCaptcha(bot, chatId, userState, imageList, userImagesPath)
             } else {
                 // Если попытки закончились, баним пользователя
                 bot.answerCallbackQuery(
@@ -210,7 +222,7 @@ class CaptchaManager(
         val sendPhotoResult = bot.sendPhoto(
             chatId = ChatId.fromId(chatId),
             photo = TelegramFile.ByFile(File(combinedImagePath)),
-            caption = "Привет ${userState.userName}! $question\nОсталось попыток: ${userState.attemptsRemaining}",
+            caption = "Привет ${userState.userName}! $question",
             replyMarkup = inlineKeyboardMarkup
         )
 
@@ -222,30 +234,6 @@ class CaptchaManager(
                 logger.warning("Ошибка при отправке капчи: $error")
             }
         )
-    }
-
-    /**
-     * Повторно отправляет капчу пользователю после неправильного ответа.
-     *
-     * @param bot Экземпляр бота.
-     * @param chatId Идентификатор чата.
-     * @param userState Состояние пользователя.
-     * @param imageList Список изображений для капчи.
-     * @param userImagesPath Путь к папке с изображениями пользователя.
-     */
-    private fun resendCaptcha(
-        bot: Bot,
-        chatId: Long,
-        userState: UserCaptchaState,
-        imageList: List<Image>,
-        userImagesPath: String
-    ) {
-        // Удаляем предыдущее сообщение с капчей
-        userState.captchaMessageId?.let { messageId ->
-            bot.deleteMessage(ChatId.fromId(chatId), messageId)
-        }
-        // Отправляем новую капчу
-        sendCaptcha(bot, chatId, userState, imageList, userImagesPath)
     }
 
     /**
@@ -302,7 +290,7 @@ class CaptchaManager(
 
         if (!dir.exists() || !dir.isDirectory) return images
 
-        val files = dir.listFiles { file -> file.isFile }?.toList()?.shuffled() ?: return images
+        val files = dir.listFiles { file -> file.isFile } ?: return images
 
         files.forEachIndexed { index, file ->
             val img = ImageIO.read(file) ?: return@forEachIndexed
